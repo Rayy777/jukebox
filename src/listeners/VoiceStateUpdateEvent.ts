@@ -55,7 +55,33 @@ export class VoiceStateUpdateEvent extends BaseListener {
         if (newID === queueVC.id && !member?.user.bot) this.resumeTimeout(queueVCMembers, queue, newState);
     }
 
-   
+    private doTimeout(vcMembers: Collection<Snowflake, GuildMember>, queue: ServerQueue, newState: IVoiceState): any {
+        try {
+            if (vcMembers.size !== 0) return undefined;
+            clearTimeout(queue.timeout!);
+            newState.guild.queue!.timeout = null;
+            newState.guild.queue!.playing = false;
+            queue.connection?.dispatcher.pause();
+            const timeout = this.client.config.deleteQueueTimeout;
+            const duration = formatMS(timeout);
+            if (queue.lastVoiceStateUpdateMessageID !== null) queue.textChannel?.messages.fetch(queue.lastVoiceStateUpdateMessageID, false).then(m => m.delete()).catch(e => this.client.logger.error("VOICE_STATE_UPDATE_EVENT_ERR:", e));
+            newState.guild.queue!.timeout = setTimeout(() => {
+                queue.voiceChannel?.leave();
+                newState.guild.queue = null;
+                if (queue.lastMusicMessageID !== null) queue.textChannel?.messages.fetch(queue.lastMusicMessageID, false).then(m => m.delete()).catch(e => this.client.logger.error("VOICE_STATE_UPDATE_EVENT_ERR:", e));
+                if (queue.lastVoiceStateUpdateMessageID !== null) queue.textChannel?.messages.fetch(queue.lastVoiceStateUpdateMessageID, false).then(m => m.delete()).catch(e => this.client.logger.error("VOICE_STATE_UPDATE_EVENT_ERR:", e));
+                queue.textChannel?.send(
+                    createEmbed("error", `**${duration}** have passed and there is no one who joins my voice channel, the queue was deleted.`)
+                        .setTitle("⏹ Queue deleted.")
+                ).catch(e => this.client.logger.error("VOICE_STATE_UPDATE_EVENT_ERR:", e));
+            }, timeout);
+            queue.textChannel?.send(
+                createEmbed("warn", "Everyone has left from my voice channel, to save resources, the queue was paused. " +
+                    `If there's no one who joins my voice channel in the next **${duration}**, the queue will be deleted.`)
+                    .setTitle("⏸ Queue paused.")
+            ).then(m => queue.lastVoiceStateUpdateMessageID = m.id).catch(e => this.client.logger.error("VOICE_STATE_UPDATE_EVENT_ERR:", e));
+        } catch (e) { this.client.logger.error("VOICE_STATE_UPDATE_EVENT_ERR:", e); }
+    }
 
     private resumeTimeout(vcMembers: Collection<Snowflake, GuildMember>, queue: ServerQueue, newState: IVoiceState): any {
         if (vcMembers.size > 0) {
